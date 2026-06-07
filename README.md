@@ -204,7 +204,6 @@ The extension is designed to run locally in the browser against the D365FO envir
 A printable feature guide is also available:
 
 - [Feature Guide Markdown](docs/feature-guide.md)
-- [Feature Guide PDF](docs/feature-guide.pdf)
 - [Privacy Policy](docs/privacy-policy.md)
 
 ## License
