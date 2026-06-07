@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Table It D365FO",
+  "short_name": "Table It D365FO",
+  "description": "Browse tables and data entities for Microsoft Dynamics 365 Finance & Operations.",
+  "version": "1.0.0",
+
+  "action": {
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    },
+    "default_popup": "popup.html"
+  },
+
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+
+  "permissions": ["storage", "tabs"],
+
+  "host_permissions": ["https://*.dynamics.com/*"],
+
+  "commands": {
+    "open-tables": {
+      "suggested_key": { "default": "Ctrl+Shift+T" },
+      "description": "Open table browser"
+    },
+    "open-entities": {
+      "suggested_key": { "default": "Ctrl+Shift+E" },
+      "description": "Open entity browser"
+    },
+    "_execute_action": {
+      "suggested_key": { "default": "Ctrl+Shift+K" },
+      "description": "Open extension popup"
+    }
+  }
+}

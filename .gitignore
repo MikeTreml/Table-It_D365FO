@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Archived local/legacy files kept out of the public repo.
+Archive/
+
+# Build and publish artifacts
+dist/
+*.map
+table-it-d365fo-upload.zip
+*.zip
+
+# Unused legacy image assets; current build uses public/icon*.png only.
+public/img/
+generate-icons.html
+scripts/convert-table-list.js
+scripts/gen_icons.py
+
+# Unused legacy source files excluded from the cleaned public copy.
+src/shared/components/index.ts
+src/shared/constants/endpoints.ts
+src/shared/constants/languages.ts
+src/shared/constants/shortcuts.ts
+src/shared/hooks/index.ts
+src/shared/hooks/useKeyboardShortcuts.ts
+src/shared/types/entity.ts
+src/shared/types/odata.ts
+src/shared/types/table.ts
+src/shared/utils/fuzzySearch.ts
+src/shared/utils/index.ts
+src/shared/utils/validation.ts
+
+# Local/editor state
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local AI/agent workspace notes
+.claude/
+.codex/
+AGENTS.md
+CLAUDE.md
+
+# Environment and logs
+.env
+.env.*
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
