@@ -1,0 +1,31 @@
+name: Extension Permission Check
+
+on:
+  pull_request:
+    paths:
+      - public/manifest.json
+      - .github/workflows/extension-permissions.yml
+  workflow_dispatch:
+
+jobs:
+  check-permissions:
+    name: Chrome permission warnings
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          path: pr
+
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: base
+
+      - name: Check manifest permission changes
+        uses: Toumash/chrome-extension-permission-check@v1
+        with:
+          baseline-manifest: base/public/manifest.json
+          new-manifest: pr/public/manifest.json
