@@ -10,14 +10,22 @@ chrome.commands.onCommand.addListener((command) => {
   }
 });
 
+// chrome.runtime.getContexts (Chrome 116+) finds our own open pages without the
+// "tabs" permission, which would add a "Read your browsing history" install warning.
 async function openOrFocus(url: string) {
-  const tabs = await chrome.tabs.query({ url });
-  if (tabs.length > 0 && tabs[0].id != null) {
-    await chrome.tabs.update(tabs[0].id, { active: true });
-    if (tabs[0].windowId != null) {
-      await chrome.windows.update(tabs[0].windowId, { focused: true });
-    }
-  } else {
+  const contexts = chrome.runtime.getContexts
+    ? await chrome.runtime.getContexts({
+        contextTypes: [chrome.runtime.ContextType.TAB],
+        documentUrls: [url],
+      })
+    : [];
+  const existing = contexts.find((context) => context.tabId !== -1);
+  if (!existing) {
     await chrome.tabs.create({ url });
+    return;
+  }
+  await chrome.tabs.update(existing.tabId, { active: true });
+  if (existing.windowId !== -1) {
+    await chrome.windows.update(existing.windowId, { focused: true });
   }
 }

@@ -27,7 +27,7 @@
     "128": "icon128.png"
   },
 
-  "permissions": ["storage", "tabs"],
+  "permissions": ["unlimitedStorage"],
 
   "host_permissions": ["https://*.dynamics.com/*"],
 
