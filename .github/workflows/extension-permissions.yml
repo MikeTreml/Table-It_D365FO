@@ -25,7 +25,7 @@ jobs:
           path: base
 
       - name: Check manifest permission changes
-        uses: Toumash/chrome-extension-permission-check@v1
+        uses: Toumash/chrome-extension-permission-check@97fe06f4f92210b091330556d6a616f9171e62cf # v1
         with:
           baseline-manifest: base/public/manifest.json
           new-manifest: pr/public/manifest.json

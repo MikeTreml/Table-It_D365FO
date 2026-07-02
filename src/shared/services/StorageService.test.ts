@@ -3,6 +3,7 @@ import { del as idbDel, entries as idbEntries, get as idbGet, set as idbSet } fr
 import type { StorageSchema } from '../types';
 
 vi.mock('idb-keyval', () => ({
+  createStore: vi.fn(() => ({})),
   del: vi.fn(),
   entries: vi.fn(),
   get: vi.fn(),
@@ -77,7 +78,7 @@ describe('StorageService', () => {
     service.onChange((change) => changes.push(change));
     await service.set('favorites', ['CustTable']);
 
-    expect(idbSet).toHaveBeenCalledWith('favorites', ['CustTable']);
+    expect(idbSet).toHaveBeenCalledWith('favorites', ['CustTable'], expect.anything());
     expect(changes).toEqual([{ favorites: ['CustTable'] }]);
   });
 
@@ -110,6 +111,6 @@ describe('StorageService', () => {
 
     await service.remove('activeProfileId');
 
-    expect(idbDel).toHaveBeenCalledWith('activeProfileId');
+    expect(idbDel).toHaveBeenCalledWith('activeProfileId', expect.anything());
   });
 });

@@ -1,4 +1,10 @@
-import { del as idbDel, entries as idbEntries, get as idbGet, set as idbSet } from 'idb-keyval';
+import {
+  createStore,
+  del as idbDel,
+  entries as idbEntries,
+  get as idbGet,
+  set as idbSet,
+} from 'idb-keyval';
 import type { StorageSchema } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 
@@ -7,6 +13,7 @@ type StorageChanges = Partial<StorageSchema>;
 type StorageChangeCallback = (changes: StorageChanges) => void;
 
 const STORAGE_SYNC_CHANNEL = 'table-it-storage-sync';
+const idbStore = createStore('table-it-d365fo', 'keyval');
 const STORAGE_KEYS = [
   'profiles',
   'activeProfileId',
@@ -15,6 +22,10 @@ const STORAGE_KEYS = [
   'entityCountCache',
   'metadataCache',
 ] as const satisfies readonly StorageKey[];
+
+type ExpectNever<T extends never> = T;
+// Compile error here when a StorageSchema key is missing from STORAGE_KEYS.
+type _MissingStorageKeys = ExpectNever<Exclude<StorageKey, (typeof STORAGE_KEYS)[number]>>;
 
 interface StorageSyncMessage {
   sourceId: string;
@@ -50,20 +61,24 @@ export class StorageService {
 
   constructor() {
     this.channel?.addEventListener('message', this.handleBroadcastMessage);
+    // Best-effort eviction protection; "unlimitedStorage" covers Chrome, this covers other engines.
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      void navigator.storage.persist().catch(() => undefined);
+    }
   }
 
   async get<K extends StorageKey>(key: K): Promise<StorageSchema[K] | undefined> {
-    return (await idbGet(key)) as StorageSchema[K] | undefined;
+    return (await idbGet(key, idbStore)) as StorageSchema[K] | undefined;
   }
 
   async set<K extends StorageKey>(key: K, value: StorageSchema[K]): Promise<void> {
-    await idbSet(key, value);
+    await idbSet(key, value, idbStore);
     this.emitChange({ [key]: value } as StorageChanges);
   }
 
   async getAll(): Promise<Partial<StorageSchema>> {
     const result: Partial<StorageSchema> = {};
-    const storedEntries = await idbEntries();
+    const storedEntries = await idbEntries(idbStore);
 
     for (const [key, value] of storedEntries) {
       if (isStorageKey(key)) {
@@ -75,7 +90,7 @@ export class StorageService {
   }
 
   async remove(key: StorageKey): Promise<void> {
-    await idbDel(key);
+    await idbDel(key, idbStore);
     this.emitChange({ [key]: undefined } as StorageChanges);
   }
 
