@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
@@ -71,6 +72,27 @@ function FieldSelector({ value, onChange, options }: {
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 });
+  const updateDropPosition = useCallback(() => {
+    const rect = inputRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const dropdownHeight = Math.min(240, Math.max(32, options.length * 24));
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const top = spaceBelow >= dropdownHeight || spaceBelow >= rect.top ? rect.bottom + 2 : Math.max(8, rect.top - dropdownHeight - 2);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - rect.width - 8));
+    setDropPos({ top, left, width: rect.width });
+  }, [options.length]);
+  useEffect(() => {
+    if (!open) return;
+    updateDropPosition();
+    window.addEventListener('resize', updateDropPosition);
+    window.addEventListener('scroll', updateDropPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateDropPosition);
+      window.removeEventListener('scroll', updateDropPosition, true);
+    };
+  }, [open, updateDropPosition]);
   const filtered = useMemo(() => {
     const q = (search || value).toLowerCase();
     return (q ? options.filter(o => o.toLowerCase().includes(q)) : options).slice(0, 80);
@@ -78,20 +100,27 @@ function FieldSelector({ value, onChange, options }: {
   return (
     <div className="relative">
       <input
+        ref={inputRef}
         type="text" value={value} placeholder="Field…"
         onChange={e => { onChange(e.target.value); setSearch(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => { updateDropPosition(); setOpen(true); }}
+        onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         className="w-full px-2 py-1 text-xs rounded border border-surface-200 dark:border-surface-600 bg-white dark:bg-surface-800 text-surface-700 dark:text-surface-300 placeholder-surface-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
       />
-      {open && filtered.length > 0 && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-600 rounded shadow-lg max-h-44 overflow-y-auto text-xs">
+      {open && filtered.length > 0 && ReactDOM.createPortal(
+        <div role="listbox" style={{ position: 'fixed', top: dropPos.top, left: dropPos.left, width: dropPos.width, zIndex: 9999 }}
+          className="bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-600 rounded shadow-lg max-h-60 overflow-y-auto text-xs">
           {filtered.map(o => (
-            <div key={o} onMouseDown={() => { onChange(o); setSearch(''); setOpen(false); }}
-              className={`px-2 py-1 cursor-pointer hover:bg-brand-50 dark:hover:bg-brand-900/20 ${value === o ? 'text-brand-600 dark:text-brand-400 font-medium' : 'text-surface-700 dark:text-surface-300'}`}
-            >{o}</div>
+            <button type="button" role="option" aria-selected={value === o} key={o} onMouseDown={event => { event.preventDefault(); onChange(o); setSearch(''); setOpen(false); }}
+              className={`block w-full px-2 py-1 text-left cursor-pointer hover:bg-brand-50 dark:hover:bg-brand-900/20 ${value === o ? 'text-brand-600 dark:text-brand-400 font-medium' : 'text-surface-700 dark:text-surface-300'}`}
+            >{o}</button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -163,6 +192,8 @@ export function EntityQueryPanel({ entity, profile }: Props) {
   const [secPage,    setSecPage]    = useState(true);
   // copy
   const [copied, setCopied] = useState(false);
+  const [generatedUrl, setGeneratedUrl] = useState('');
+  const [urlError, setUrlError] = useState('');
   // /$count
   const [countResult, setCountResult] = useState<number | null>(null);
   const [countLoading, setCountLoading] = useState(false);
@@ -253,19 +284,51 @@ export function EntityQueryPanel({ entity, profile }: Props) {
     });
   }, [profile.baseUrl, entity.PublicCollectionName, selectedFields, effectiveFilter, top, skip, count, crossCompany]);
 
-  const copyUrl = async () => { if (!queryUrl) return; await navigator.clipboard.writeText(queryUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  useEffect(() => {
+    setGeneratedUrl(queryUrl ?? '');
+    setUrlError('');
+  }, [queryUrl]);
+
+  const copyUrl = async () => { if (!generatedUrl) return; await navigator.clipboard.writeText(generatedUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   const openInGrid = () => {
-    if (!entity.PublicCollectionName) return;
+    if (!generatedUrl.trim()) return;
+    let sourceUrl: URL;
+    try {
+      sourceUrl = new URL(generatedUrl.trim());
+    } catch {
+      setUrlError('Enter a valid OData URL before opening the grid.');
+      return;
+    }
+
+    const collectionMatch = sourceUrl.pathname.match(/\/data\/([^/]+)/i);
+    if (!collectionMatch) {
+      setUrlError('The URL must contain a /data/{collection} path.');
+      return;
+    }
+
+    let collectionName: string;
+    try {
+      collectionName = decodeURIComponent(collectionMatch[1]);
+    } catch {
+      setUrlError('The URL contains an invalid collection name.');
+      return;
+    }
+
     const params = new URLSearchParams();
-    params.set('collection', entity.PublicCollectionName);
+    params.set('collection', collectionName);
     params.set('entity', entity.Name);
-    const filterStr = buildQueryFilterString(filters);
-    if (filterStr) params.set('odata_filter', filterStr);
-    if (selectedFields.length > 0) params.set('odata_select', selectedFields.join(','));
-    if (top)  params.set('odata_top', top);
-    if (skip) params.set('odata_skip', skip);
-    if (count) params.set('odata_count', 'true');
-    if (crossCompany) params.set('odata_cross_company', 'true');
+    const copyQueryParam = (sourceName: string, targetName: string) => {
+      const value = sourceUrl.searchParams.get(sourceName);
+      if (value !== null && value !== '') params.set(targetName, value);
+    };
+    copyQueryParam('$filter', 'odata_filter');
+    copyQueryParam('$select', 'odata_select');
+    copyQueryParam('$orderby', 'odata_orderby');
+    copyQueryParam('$top', 'odata_top');
+    copyQueryParam('$skip', 'odata_skip');
+    if (sourceUrl.searchParams.get('$count') === 'true') params.set('odata_count', 'true');
+    if (sourceUrl.searchParams.get('cross-company') === 'true') params.set('odata_cross_company', 'true');
+    setUrlError('');
     chrome.tabs.create({
       url: withExtensionProfile(
         `${chrome.runtime.getURL('EntityData.html')}?${params.toString()}`,
@@ -536,9 +599,10 @@ export function EntityQueryPanel({ entity, profile }: Props) {
           <div className="px-3 py-2 rounded-lg bg-brand-600 dark:bg-brand-900/30 border border-brand-900 dark:border-brand-700 text-xs font-semibold text-surface-50 dark:text-white uppercase tracking-wide">
             Generated URL
           </div>
-          <div className="font-mono text-xs bg-surface-900 dark:bg-black/60 text-green-400 rounded-lg px-3 py-2.5 break-all leading-relaxed border border-surface-700">
-            {queryUrl}
-          </div>
+          <textarea value={generatedUrl} onChange={e => { setGeneratedUrl(e.target.value); setUrlError(''); }} rows={3} spellCheck={false}
+            aria-label="Generated OData URL"
+            className="w-full resize-y font-mono text-xs bg-surface-900 dark:bg-black/60 text-green-400 rounded-lg px-3 py-2.5 break-all leading-relaxed border border-surface-700 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          {urlError && <p className="text-xs text-red-500">{urlError}</p>}
           <div className="flex gap-2">
             <button onClick={copyUrl}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex-1 justify-center ${PRIMARY_ACTION_CLS}`}>

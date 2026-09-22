@@ -24,8 +24,8 @@ const STANDARD_TYPES = new Set([
   'String', 'Int32', 'Int64', 'Real', 'DateTime', 'UtcDateTime',
   'Date', 'Time', 'Guid', 'Container', 'Class', 'Blob', 'Binary',
   'Boolean', 'Decimal', 'Double', 'Float',
-  'Edm.String', 'Edm.Int32', 'Edm.Int64', 'Edm.Decimal', 'Edm.Boolean',
-  'Edm.DateTimeOffset', 'Edm.Guid', 'Edm.Double',
+  'Edm.String', 'Edm.Int16', 'Edm.Int32', 'Edm.Int64', 'Edm.Decimal', 'Edm.Boolean',
+  'Edm.Date', 'Edm.DateTimeOffset', 'Edm.TimeOfDay', 'Edm.Guid', 'Edm.Double', 'Edm.Single', 'Edm.Binary',
 ]);
 
 const isAxTypeAnnotation = (fieldType: string) =>

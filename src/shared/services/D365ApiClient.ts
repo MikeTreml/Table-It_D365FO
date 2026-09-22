@@ -136,8 +136,8 @@ function isStandardFieldType(typeName?: string): boolean {
     'String', 'Int32', 'Int64', 'Real', 'DateTime', 'UtcDateTime',
     'Date', 'Time', 'Guid', 'Container', 'Class', 'Blob', 'Binary',
     'Boolean', 'Decimal', 'Double', 'Float',
-    'Edm.String', 'Edm.Int32', 'Edm.Int64', 'Edm.Decimal', 'Edm.Boolean',
-    'Edm.DateTimeOffset', 'Edm.Guid', 'Edm.Double',
+    'Edm.String', 'Edm.Int16', 'Edm.Int32', 'Edm.Int64', 'Edm.Decimal', 'Edm.Boolean',
+    'Edm.Date', 'Edm.DateTimeOffset', 'Edm.TimeOfDay', 'Edm.Guid', 'Edm.Double', 'Edm.Single', 'Edm.Binary',
   ].includes(typeName ?? '');
 }
 
@@ -541,21 +541,32 @@ export class D365ApiClient {
 
   async fetchEntityData(
     collectionName: string,
-    top: number,
+    top?: number,
     odataParams?: { filter?: string; select?: string; orderby?: string; skip?: string; count?: boolean; crossCompany?: boolean },
-  ): Promise<{ records: Record<string, unknown>[]; totalCount?: number }> {
+  ): Promise<{ records: Record<string, unknown>[]; totalCount?: number; nextLink?: string }> {
     try {
-      const params: Record<string, string | number | boolean> = { '$top': top };
+      const params: Record<string, string | number | boolean> = {};
+      if (top !== undefined) params['$top'] = top;
       if (odataParams?.filter)  params['$filter']  = odataParams.filter;
       if (odataParams?.select)  params['$select']  = odataParams.select;
       if (odataParams?.orderby) params['$orderby'] = odataParams.orderby;
       if (odataParams?.skip)    params['$skip']    = odataParams.skip;
       if (odataParams?.count)   params['$count']   = true;
       if (odataParams?.crossCompany) params['cross-company'] = true;
-      const resp = await this.client.get<{ value: Record<string, unknown>[]; '@odata.count'?: number }>(`/data/${collectionName}`, { params });
+      const resp = await this.client.get<{ value: Record<string, unknown>[]; '@odata.count'?: number; '@odata.nextLink'?: string }>(`/data/${collectionName}`, { params });
+      const records = [...(resp.data.value ?? [])];
+      let nextLink = resp.data['@odata.nextLink'];
+      while (top !== undefined && records.length < top && nextLink) {
+        const requestedLink = nextLink;
+        const nextPage = await this.fetchEntityDataNextPage(requestedLink);
+        records.push(...nextPage.records);
+        nextLink = nextPage.nextLink;
+        if (nextPage.records.length === 0 && nextLink === requestedLink) break;
+      }
       return {
-        records: resp.data.value ?? [],
+        records,
         totalCount: resp.data['@odata.count'],
+        nextLink,
       };
     } catch (err) {
       throw handleApiError(err as AxiosError);
@@ -586,6 +597,18 @@ export class D365ApiClient {
     try {
       const publicEnumerations = await this.fetchAllPublicEnumerationsFromNetwork();
       return this.mapPublicEnumerationsToEnumMap(publicEnumerations);
+    } catch (err) {
+      throw handleApiError(err as AxiosError);
+    }
+  }
+
+  async fetchEntityDataNextPage(nextLink: string): Promise<{ records: Record<string, unknown>[]; totalCount?: number; nextLink?: string }> {
+    try {
+      const environmentUrl = new URL(`https://${this.baseUrl}`);
+      const url = new URL(nextLink, environmentUrl);
+      if (url.protocol !== 'https:' || url.host.toLowerCase() !== environmentUrl.host.toLowerCase()) throw new Error('OData next link points outside the active environment.');
+      const resp = await this.client.get<{ value: Record<string, unknown>[]; '@odata.count'?: number; '@odata.nextLink'?: string }>(url.toString());
+      return { records: resp.data.value ?? [], totalCount: resp.data['@odata.count'], nextLink: resp.data['@odata.nextLink'] };
     } catch (err) {
       throw handleApiError(err as AxiosError);
     }

@@ -16,7 +16,8 @@ export type QueryFilterRow = {
   field: string;
   operator: string;
   value: string;
-  valueType: 'string' | 'number' | 'boolean';
+  valueType: 'string' | 'number' | 'boolean' | 'date' | 'datetime' | 'time' | 'guid' | 'enum';
+  enumType?: string;
   openParen?: boolean;
   closeParen?: boolean;
   logic?: 'and' | 'or';
@@ -61,7 +62,7 @@ export function formatQueryFilterRow(row: QueryFilterRow): string {
     return `${row.operator}(${row.field},'${escapeODataString(row.value)}')`;
   }
 
-  return `${row.field} ${row.operator} ${formatQueryFilterValue(row.value, row.valueType)}`;
+  return `${row.field} ${row.operator} ${formatQueryFilterValue(row.value, row.valueType, row.enumType)}`;
 }
 
 export function buildQueryFilterString(rows: QueryFilterRow[]): string {
@@ -88,10 +89,18 @@ function formatSimpleODataValue(value: string): string {
   return Number.isNaN(Number(value)) ? `'${escapedValue}'` : value;
 }
 
-function formatQueryFilterValue(value: string, valueType: QueryFilterRow['valueType']): string {
+function formatQueryFilterValue(value: string, valueType: QueryFilterRow['valueType'], enumType?: string): string {
   switch (valueType) {
     case 'string': return `'${escapeODataString(value)}'`;
     case 'boolean': return value === 'true' ? 'true' : 'false';
     case 'number': return value || '0';
+    case 'date':
+    case 'datetime':
+    case 'time':
+    case 'guid': return value;
+    case 'enum': {
+      const qualifiedType = enumType?.includes('.') ? enumType : `Microsoft.Dynamics.DataEntities.${enumType ?? ''}`;
+      return `${qualifiedType}'${escapeODataString(value)}'`;
+    }
   }
 }

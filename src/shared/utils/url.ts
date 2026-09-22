@@ -111,7 +111,7 @@ export function buildEntityDataUrl(
   if (params.skip !== undefined && params.skip !== '') url.searchParams.set('$skip', String(params.skip));
   if (params.count) url.searchParams.set('$count', 'true');
   if (params.crossCompany) url.searchParams.set('cross-company', 'true');
-  return url.toString();
+  return url.toString().replace(/([?&])%24(?=[^&=]+=)/g, '$1$');
 }
 
 /**

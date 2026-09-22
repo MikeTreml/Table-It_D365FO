@@ -10,7 +10,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   TableProperties, AlertCircle, RefreshCw, Download, ChevronDown,
   ChevronUp, ChevronLeft, ChevronRight, Info, X, FilterX, LogIn,
-  ExternalLink, Copy, EyeOff,
+  ExternalLink, Copy, EyeOff, Eye, SlidersHorizontal, Plus, Trash2, Check,
 } from 'lucide-react';
 import {
   BrowserToolbar,
@@ -18,7 +18,6 @@ import {
   BrowserToolbarProfile,
   BROWSER_TOOLBAR_ACTION_ACTIVE_CLS,
   BROWSER_TOOLBAR_ACTION_CLS,
-  BROWSER_TOOLBAR_INPUT_CLS,
 } from '@shared/components/BrowserToolbarIdentity';
 import { SearchInput } from '@shared/components/SearchInput';
 import { useAppTheme } from '@shared/hooks/useAppTheme';
@@ -29,7 +28,8 @@ import { useSettingsStore } from '@shared/stores/settingsStore';
 import { D365ApiClient } from '@shared/services/D365ApiClient';
 import type { EntityField, ApiError } from '@shared/types';
 import { getReadableHeaderWidth } from '@shared/utils/columnSizing';
-import { exportCSV as downloadCSV, exportJSON as downloadJSON } from '@shared/utils/exporters';
+import { createStreamingCSVWriter, exportCSV as downloadCSV, exportJSON as downloadJSON, type StreamingCSVWriter } from '@shared/utils/exporters';
+import { buildQueryFilterString, ENTITY_QUERY_OPERATORS, type QueryFilterRow } from '@shared/utils/odata';
 import { buildEntityDataUrl, buildEnvironmentUrl } from '@shared/utils/url';
 
 // ─── URL params ───────────────────────────────────────────────────────────────
@@ -51,8 +51,8 @@ function getParams() {
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-function ExportButton({ data, columns, filename }: {
-  data: Record<string, unknown>[]; columns: string[]; filename: string;
+function ExportButton({ data, columns, filename, onExportAll, disabledAll }: {
+  data: Record<string, unknown>[]; columns: string[]; filename: string; onExportAll: () => void; disabledAll: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -64,7 +64,7 @@ function ExportButton({ data, columns, filename }: {
   const visibleRecords = data.map((row) => Object.fromEntries(columns.map((column) => [column, row[column]])));
   return (
     <div ref={ref} className="relative shrink-0">
-      <button onClick={() => setOpen(v => !v)} disabled={data.length === 0}
+      <button onClick={() => setOpen(v => !v)} disabled={data.length === 0 && disabledAll}
         title="Exports only the records currently loaded on this page, including active grid filters"
         className={BROWSER_TOOLBAR_ACTION_CLS}>
         <Download className="w-3.5 h-3.5" /> Export <ChevronDown className="w-3 h-3 opacity-60" />
@@ -72,22 +72,31 @@ function ExportButton({ data, columns, filename }: {
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg shadow-lg overflow-hidden min-w-[140px]">
           <button onClick={() => { downloadCSV(visibleRecords, `${filename}.csv`, columns); setOpen(false); }}
+            disabled={visibleRecords.length === 0}
             title="Download only the records currently loaded on this page, including active grid filters"
-            className="w-full px-3 py-2 text-xs text-left text-surface-700 dark:text-surface-200 hover:bg-surface-50 dark:hover:bg-surface-700">Download CSV</button>
+            className="w-full px-3 py-2 text-xs text-left text-surface-700 dark:text-surface-200 hover:bg-surface-50 dark:hover:bg-surface-700 disabled:opacity-40">Download CSV</button>
           <button onClick={() => { downloadJSON({ exportedAt: new Date().toISOString(), count: visibleRecords.length, records: visibleRecords }, `${filename}.json`); setOpen(false); }}
+            disabled={visibleRecords.length === 0}
             title="Download only the records currently loaded on this page, including active grid filters"
-            className="w-full px-3 py-2 text-xs text-left text-surface-700 dark:text-surface-200 hover:bg-surface-50 dark:hover:bg-surface-700">Download JSON</button>
+            className="w-full px-3 py-2 text-xs text-left text-surface-700 dark:text-surface-200 hover:bg-surface-50 dark:hover:bg-surface-700 disabled:opacity-40">Download JSON</button>
+          <button onClick={() => { onExportAll(); setOpen(false); }} disabled={disabledAll}
+            title="Fetch every matching page from D365FO and combine it into one CSV"
+            className="w-full px-3 py-2 text-xs text-left font-medium text-brand-700 dark:text-brand-300 border-t border-surface-200 dark:border-surface-700 hover:bg-brand-50 dark:hover:bg-brand-900/20 disabled:opacity-40">CSV All…</button>
         </div>
       )}
     </div>
   );
 }
 
-function QueryUrlBar({ url }: { url: string }) {
+function QueryUrlBar({ url, onApply }: { url: string; onApply: (url: string) => string | null }) {
   const [copied, setCopied] = useState(false);
+  const [draft, setDraft] = useState(url);
+  const [error, setError] = useState('');
+
+  useEffect(() => { setDraft(url); setError(''); }, [url]);
 
   const copyUrl = async () => {
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(draft);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   };
@@ -95,9 +104,13 @@ function QueryUrlBar({ url }: { url: string }) {
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 border-b border-surface-200 dark:border-surface-700 bg-surface-100 dark:bg-surface-850 text-xs shrink-0">
       <span className="text-surface-400 dark:text-surface-500 shrink-0">URL</span>
-      <code className="flex-1 min-w-0 truncate text-surface-600 dark:text-surface-300" title={url}>
-        {url}
-      </code>
+      <input value={draft} onChange={event => { setDraft(event.target.value); setError(''); }} spellCheck={false}
+        className="flex-1 min-w-0 px-2 py-1 font-mono text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 text-surface-600 dark:text-surface-300 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        aria-label="Editable OData URL" title={draft} />
+      {error && <span className="text-red-600 dark:text-red-400 shrink-0" title={error}>{error}</span>}
+      <button type="button" onClick={() => { const message = onApply(draft); setError(message ?? ''); }}
+        className="flex items-center gap-1 px-2 py-1 rounded font-medium text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-900/20 transition-colors shrink-0"
+        title="Apply this URL to the grid"><Check className="w-3 h-3" /> Apply</button>
       <button
         type="button"
         onClick={copyUrl}
@@ -109,7 +122,7 @@ function QueryUrlBar({ url }: { url: string }) {
       </button>
       <button
         type="button"
-        onClick={() => chrome.tabs.create({ url })}
+        onClick={() => chrome.tabs.create({ url: draft })}
         className="flex items-center gap-1 px-2 py-1 rounded text-surface-500 dark:text-surface-300 hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors shrink-0"
         title="Open URL"
       >
@@ -120,14 +133,178 @@ function QueryUrlBar({ url }: { url: string }) {
   );
 }
 
+type FilterCondition = QueryFilterRow & { id: string };
+
+function newFilterCondition(): FilterCondition {
+  return { id: crypto.randomUUID(), field: '', operator: 'eq', value: '', valueType: 'string', logic: 'and' };
+}
+
+function useModalFocus<T extends HTMLElement>(open: boolean, onClose: () => void) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const panel = ref.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+    const focusable = () => Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector));
+    (focusable()[0] ?? panel).focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+      previousFocus?.focus();
+    };
+  }, [onClose, open]);
+  return ref;
+}
+
+function FilterDrawer({ open, fields, enumMap, enumLoading, visibleColumns, hiddenColumns, initialParams, initialTop, onClose, onApply }: {
+  open: boolean;
+  fields: EntityField[];
+  enumMap?: Map<string, Array<{ name: string; value: number }>>;
+  enumLoading: boolean;
+  visibleColumns: string[];
+  hiddenColumns: Set<string>;
+  initialParams: ODataParams;
+  initialTop?: number;
+  onClose: () => void;
+  onApply: (params: ODataParams, top?: number) => void;
+}) {
+  const panelRef = useModalFocus<HTMLElement>(open, onClose);
+  const [rawFilter, setRawFilter] = useState(initialParams.filter ?? '');
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
+  const [orderby, setOrderby] = useState(initialParams.orderby ?? '');
+  const [top, setTop] = useState(initialTop ? String(initialTop) : '');
+  const [count, setCount] = useState(!!initialParams.count);
+  const [crossCompany, setCrossCompany] = useState(!!initialParams.crossCompany);
+
+  useEffect(() => {
+    if (!open) return;
+    setRawFilter(initialParams.filter ?? '');
+    setConditions([]);
+    setSelectedColumns(initialParams.select ? initialParams.select.split(',').map(value => value.trim()).filter(Boolean) : hiddenColumns.size > 0 ? visibleColumns : []);
+    setOrderby(initialParams.orderby ?? '');
+    setTop(initialTop ? String(initialTop) : '');
+    setCount(!!initialParams.count);
+    setCrossCompany(!!initialParams.crossCompany);
+  }, [open, hiddenColumns, initialParams, initialTop, visibleColumns]);
+
+  if (!open) return null;
+  const fieldNames = fields.map(field => field.Name);
+  const getValueDetails = (fieldName: string): Pick<QueryFilterRow, 'valueType' | 'enumType'> => {
+    const field = fields.find(item => item.Name === fieldName);
+    const enumType = getEnumType(field);
+    if (enumType) return { valueType: 'enum', enumType };
+    const typeName = `${field?.FieldType ?? ''} ${field?.TypeName ?? ''} ${field?.DataType ?? ''}`.toLowerCase();
+    if (typeName.includes('boolean')) return { valueType: 'boolean' };
+    if (/(int|real|decimal|double|float|number)/.test(typeName)) return { valueType: 'number' };
+    if (typeName.includes('datetime') || typeName.includes('utcdatetime')) return { valueType: 'datetime' };
+    if (typeName.includes('timeofday') || /(^|\s)time($|\s)/.test(typeName)) return { valueType: 'time' };
+    if (typeName.includes('date')) return { valueType: 'date' };
+    if (typeName.includes('guid')) return { valueType: 'guid' };
+    return { valueType: 'string' };
+  };
+  const orderedFields = [...visibleColumns, ...fieldNames.filter(name => !visibleColumns.includes(name))];
+  const generatedFilter = buildQueryFilterString(conditions);
+  const hasIncompleteCondition = conditions.some(condition => !condition.field || (!['isnull', 'isnotnull'].includes(condition.operator) && condition.value === ''));
+  const awaitingEnumOptions = enumLoading && conditions.some(condition => condition.valueType === 'enum' && !['isnull', 'isnotnull'].includes(condition.operator));
+  const operatorsFor = (valueType: QueryFilterRow['valueType']) => ENTITY_QUERY_OPERATORS.filter(operator => {
+    if (valueType === 'string') return true;
+    if (valueType === 'boolean' || valueType === 'enum' || valueType === 'guid') return ['eq', 'ne', 'isnull', 'isnotnull'].includes(operator.value);
+    return !['contains', 'startswith', 'endswith'].includes(operator.value);
+  });
+  const toggleColumn = (name: string) => setSelectedColumns(current => current.includes(name) ? current.filter(column => column !== name) : [...current, name]);
+  const patchCondition = (id: string, patch: Partial<FilterCondition>) => setConditions(current => current.map(condition => condition.id === id ? { ...condition, ...patch } : condition));
+
+  return (
+    <div className="fixed inset-0 z-[100] flex justify-end bg-black/25" role="dialog" aria-modal="true" aria-label="Filter entity data">
+      <button className="flex-1 cursor-default" onClick={onClose} aria-label="Close filter panel" />
+      <aside ref={panelRef} tabIndex={-1} className="w-[34rem] max-w-[92vw] h-full flex flex-col bg-white dark:bg-surface-900 border-l border-surface-200 dark:border-surface-700 shadow-2xl outline-none">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-surface-200 dark:border-surface-700">
+          <div><h2 className="text-sm font-semibold">Filter and columns</h2><p className="text-xs text-surface-400 mt-0.5">Changes are staged until Apply.</p></div>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-surface-100 dark:hover:bg-surface-800" aria-label="Close"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-5">
+          <section>
+            <div className="flex items-center justify-between mb-2"><h3 className="text-xs font-semibold uppercase tracking-wide text-surface-500">Filter conditions</h3><button onClick={() => setConditions(current => [...current, newFilterCondition()])} className="flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400"><Plus className="w-3 h-3" /> Add</button></div>
+            <div className="space-y-2 overflow-visible">
+              {conditions.map((condition, index) => (
+                <div key={condition.id} className="grid grid-cols-[4.5rem_minmax(0,1fr)_7rem_minmax(0,1fr)_1.5rem] gap-1.5 items-center overflow-visible">
+                  <select value={index === 0 ? 'and' : condition.logic} onChange={event => patchCondition(condition.id, { logic: event.target.value as 'and' | 'or' })} disabled={index === 0} className="px-2 py-1.5 text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 disabled:opacity-40"><option value="and">AND</option><option value="or">OR</option></select>
+                  <select value={condition.field} onChange={event => patchCondition(condition.id, { field: event.target.value, operator: 'eq', value: '', ...getValueDetails(event.target.value) })} className="min-w-0 px-2 py-1.5 text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800"><option value="">Field…</option>{fieldNames.map(name => <option key={name}>{name}</option>)}</select>
+                  <select value={condition.operator} onChange={event => patchCondition(condition.id, { operator: event.target.value })} className="px-2 py-1.5 text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800">{operatorsFor(condition.valueType).map(operator => <option key={operator.value} value={operator.value}>{operator.label}</option>)}</select>
+                  {condition.valueType === 'enum' && (enumLoading || !!getEnumMembers(enumMap, condition.enumType ?? null)?.length) ? (
+                    <select value={condition.value} onChange={event => patchCondition(condition.id, { value: event.target.value })} disabled={condition.operator === 'isnull' || condition.operator === 'isnotnull' || enumLoading} className="min-w-0 px-2 py-1.5 text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 disabled:opacity-40"><option value="">{enumLoading ? 'Loading…' : 'Enum member…'}</option>{getEnumMembers(enumMap, condition.enumType ?? null)?.map(member => <option key={member.name} value={member.name}>{member.name}</option>)}</select>
+                  ) : condition.valueType === 'boolean' ? (
+                    <select value={condition.value} onChange={event => patchCondition(condition.id, { value: event.target.value })} disabled={condition.operator === 'isnull' || condition.operator === 'isnotnull'} className="min-w-0 px-2 py-1.5 text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 disabled:opacity-40"><option value="">Value…</option><option value="true">true</option><option value="false">false</option></select>
+                  ) : (
+                    <input value={condition.value} onChange={event => patchCondition(condition.id, { value: event.target.value })} disabled={condition.operator === 'isnull' || condition.operator === 'isnotnull'} placeholder={condition.valueType === 'enum' ? 'Enum member' : condition.valueType === 'date' ? 'YYYY-MM-DD' : condition.valueType === 'datetime' ? 'ISO date/time' : condition.valueType === 'time' ? 'HH:mm:ss' : condition.valueType === 'guid' ? 'GUID' : 'Value'} className="min-w-0 px-2 py-1.5 text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 disabled:opacity-40" />
+                  )}
+                  <button onClick={() => setConditions(current => current.filter(item => item.id !== condition.id))} className="text-red-500" aria-label="Remove condition"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+              {conditions.length === 0 && <p className="text-xs text-surface-400">Add conditions, or edit the advanced OData filter below.</p>}
+            </div>
+            {generatedFilter && <code className="block mt-2 p-2 text-[11px] break-all rounded bg-surface-100 dark:bg-surface-800 text-surface-600 dark:text-surface-300">{generatedFilter}</code>}
+            <label className="block mt-3 text-xs text-surface-500">Advanced $filter</label>
+            <textarea value={rawFilter} onChange={event => setRawFilter(event.target.value)} rows={3} spellCheck={false} placeholder="Use this when no condition rows are defined" className="mt-1 w-full p-2 font-mono text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800" />
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-2"><div><h3 className="text-xs font-semibold uppercase tracking-wide text-surface-500">Columns returned</h3>{hiddenColumns.size > 0 && <p className="text-[11px] text-surface-400 mt-0.5">Viewable columns are selected first to reduce load time.</p>}</div><div className="flex gap-2 text-xs"><button onClick={() => setSelectedColumns(visibleColumns)} className="text-brand-600 dark:text-brand-400">Visible</button><button onClick={() => setSelectedColumns([])} className="text-surface-500">All</button></div></div>
+            <div className="max-h-52 overflow-y-auto grid grid-cols-2 gap-x-3 gap-y-1 p-2 rounded border border-surface-200 dark:border-surface-700">
+              {orderedFields.map(name => <label key={name} className={`flex items-center gap-2 px-1 py-1 text-xs rounded ${hiddenColumns.has(name) ? 'text-surface-400' : ''}`}><input type="checkbox" checked={selectedColumns.includes(name)} onChange={() => toggleColumn(name)} /><span className="truncate" title={name}>{name}</span>{hiddenColumns.has(name) && <EyeOff className="w-3 h-3 ml-auto" />}</label>)}
+            </div>
+            <p className="mt-1 text-[11px] text-surface-400">No selections means D365FO returns all columns.</p>
+          </section>
+
+          <section className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-surface-500">$orderby<input value={orderby} onChange={event => setOrderby(event.target.value)} placeholder="Field asc" className="mt-1 w-full px-2 py-1.5 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800" /></label>
+            <label className="text-xs text-surface-500">$top<input type="number" min="1" value={top} onChange={event => setTop(event.target.value)} placeholder="No page limit" className="mt-1 w-full px-2 py-1.5 rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800" /></label>
+            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={count} onChange={event => setCount(event.target.checked)} /> Include total count</label>
+            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={crossCompany} onChange={event => setCrossCompany(event.target.checked)} /> Cross-company</label>
+          </section>
+        </div>
+        <div className="flex items-center justify-end gap-2 p-4 border-t border-surface-200 dark:border-surface-700">{hasIncompleteCondition && <span className="mr-auto text-xs text-amber-600 dark:text-amber-400">Complete or remove each condition.</span>}<button onClick={onClose} className="px-4 py-2 text-xs rounded border border-surface-200 dark:border-surface-700">Cancel</button><button disabled={hasIncompleteCondition || awaitingEnumOptions} onClick={() => onApply({ filter: generatedFilter || rawFilter.trim() || undefined, select: selectedColumns.length ? selectedColumns.join(',') : undefined, orderby: orderby.trim() || undefined, count, crossCompany }, top ? Math.max(1, Number.parseInt(top, 10) || 1) : undefined)} className="px-4 py-2 text-xs font-medium rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-40">Apply</button></div>
+      </aside>
+    </div>
+  );
+}
+
 // ─── Field info panel ─────────────────────────────────────────────────────────
 
 const STANDARD_TYPES = new Set([
   'String', 'Int32', 'Int64', 'Real', 'DateTime', 'UtcDateTime',
   'Date', 'Time', 'Guid', 'Container', 'Class', 'Blob', 'Binary',
   'Boolean', 'Decimal', 'Double', 'Float',
-  'Edm.String', 'Edm.Int32', 'Edm.Int64', 'Edm.Decimal', 'Edm.Boolean',
-  'Edm.DateTimeOffset', 'Edm.Guid', 'Edm.Double',
+  'Edm.String', 'Edm.Int16', 'Edm.Int32', 'Edm.Int64', 'Edm.Decimal', 'Edm.Boolean',
+  'Edm.Date', 'Edm.DateTimeOffset', 'Edm.TimeOfDay', 'Edm.Guid', 'Edm.Double', 'Edm.Single', 'Edm.Binary',
 ]);
 
 const isAxTypeAnnotation = (fieldType: string) =>
@@ -251,23 +428,12 @@ function CellValue({ value }: { value: unknown }) {
 
 // ─── Data table ───────────────────────────────────────────────────────────────
 
-function isBlankOrZero(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  if (typeof value === 'boolean') return value === false;
-  if (typeof value === 'number') return value === 0;
-  if (typeof value === 'bigint') return value === 0n;
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    const normalized = trimmed.toLowerCase();
-    return trimmed === '' || normalized === 'no' || normalized === 'false' || Number(trimmed) === 0;
-  }
-  return false;
-}
-
 type Row = Record<string, unknown>;
 type ODataParams = { filter?: string; select?: string; orderby?: string; skip?: string; count?: boolean; crossCompany?: boolean };
+type HeaderDisplayMode = 'label' | 'field' | 'both';
 
 interface PaginationProps {
+  enabled: boolean;
   page: number;
   topN: number;
   totalFetched: number;
@@ -284,6 +450,7 @@ function DataTable({
   columnFilters, onColumnFiltersChange,
   globalFilter, onGlobalFilterChange,
   onVisibleRowsChange,
+  hideMode, pendingHiddenColumns, onToggleColumnHidden,
   pagination,
   emptyMessage,
 }: {
@@ -299,6 +466,9 @@ function DataTable({
   globalFilter: string;
   onGlobalFilterChange: React.Dispatch<React.SetStateAction<string>>;
   onVisibleRowsChange: (rows: Row[]) => void;
+  hideMode: boolean;
+  pendingHiddenColumns: Set<string>;
+  onToggleColumnHidden: (column: string) => void;
   pagination: PaginationProps;
   emptyMessage: string;
 }) {
@@ -390,7 +560,7 @@ function DataTable({
                   const field = fieldMap.get(col.id);
                   return (
                     <th key={header.id} style={{ width: header.getSize() }}
-                      className="relative pl-1 pr-2 py-2 text-left font-semibold text-surface-600 dark:text-surface-300 bg-surface-50 dark:bg-surface-800 border-b border-r border-surface-300 dark:border-surface-600/80 select-none"
+                      className={`relative pl-1 pr-2 py-2 text-left font-semibold bg-surface-50 dark:bg-surface-800 border-b border-r border-surface-300 dark:border-surface-600/80 select-none ${pendingHiddenColumns.has(col.id) ? 'text-surface-400 dark:text-surface-500 bg-surface-200/90 dark:bg-surface-950/80' : 'text-surface-600 dark:text-surface-300'}`}
                     >
                       <div className="flex items-center gap-1 min-w-0">
                         <button
@@ -401,11 +571,13 @@ function DataTable({
                           <span
                             className={[
                               'truncate',
-                              field
-                                ? field.AllowEdit
-                                  ? 'text-green-600 dark:text-green-400'
-                                  : 'text-surface-400 dark:text-surface-500'
-                                : '',
+                              pendingHiddenColumns.has(col.id)
+                                ? 'opacity-45 grayscale line-through decoration-2'
+                                : field
+                                  ? field.AllowEdit
+                                    ? 'text-green-600 dark:text-green-400'
+                                    : 'text-surface-400 dark:text-surface-500'
+                                  : '',
                             ].join(' ')}
                             title={field ? (field.AllowEdit ? 'Allow edit: Yes' : 'Allow edit: No') : undefined}
                           >
@@ -429,6 +601,13 @@ function DataTable({
                           <div className="absolute right-[0.2rem] top-0.5 z-10">
                             <ColumnFilter column={col as Column<unknown, unknown>} positioned={false} />
                           </div>
+                        )}
+                        {hideMode && (
+                          <button onClick={() => onToggleColumnHidden(col.id)}
+                            className={`absolute left-1 top-0.5 z-20 p-px rounded ${pendingHiddenColumns.has(col.id) ? 'text-surface-400' : 'text-brand-600 dark:text-brand-400'}`}
+                            title={pendingHiddenColumns.has(col.id) ? 'Show this column' : 'Hide this column'} aria-label={pendingHiddenColumns.has(col.id) ? `Show ${col.id}` : `Hide ${col.id}`}>
+                            {pendingHiddenColumns.has(col.id) ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
                         )}
                       </div>
                       {col.getCanResize() && (
@@ -500,7 +679,7 @@ function DataTable({
         )}
 
         {/* Pagination */}
-        <div className="ml-auto flex items-center gap-2">
+        {pagination.enabled && <div className="ml-auto flex items-center gap-2">
           {pagination.page > 0 && (
             <span className="text-surface-300 dark:text-surface-600">
               rows {(pagination.page * pagination.topN + 1).toLocaleString()}–{(pagination.page * pagination.topN + pagination.totalFetched).toLocaleString()}
@@ -523,7 +702,7 @@ function DataTable({
           >
             Next <ChevronRight className="w-3 h-3" />
           </button>
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -531,7 +710,6 @@ function DataTable({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-const TOP_OPTIONS = [1, 10, 100, 250, 500, 1000, 2500, 5000, 10000];
 const ENTITY_DATA_MIN_COLUMN_WIDTH = 64;
 const ENTITY_DATA_MAX_COLUMN_WIDTH = 420;
 
@@ -543,22 +721,36 @@ function getValueWidth(value: unknown): number {
 }
 
 export function EntityDataPage() {
-  const { collection, entityName, odataFilter, odataSelect, odataOrderby, odataTop, odataSkip, odataCount, odataCrossCompany } = getParams();
-
-  const initialTopN = odataTop ? Number(odataTop) || 100 : 100;
-  const [topN, setTopN]                               = useState(initialTopN);
-  const [topInput, setTopInput]                       = useState(String(initialTopN));
+  const initialUrlParams = useMemo(getParams, []);
+  const { collection, entityName } = initialUrlParams;
+  const initialTopN = Number.parseInt(initialUrlParams.odataTop, 10);
+  const [topN, setTopN] = useState(!Number.isNaN(initialTopN) && initialTopN > 0 ? initialTopN : 100);
+  const [appliedParams, setAppliedParams] = useState<ODataParams>({
+    filter: initialUrlParams.odataFilter || undefined,
+    select: initialUrlParams.odataSelect || undefined,
+    orderby: initialUrlParams.odataOrderby || undefined,
+    skip: initialUrlParams.odataSkip || undefined,
+    count: initialUrlParams.odataCount,
+    crossCompany: initialUrlParams.odataCrossCompany,
+  });
   const [page, setPage]                               = useState(0);
   const [globalFilter, setGlobalFilter]               = useState('');
+  const [headerDisplayMode, setHeaderDisplayMode] = useState<HeaderDisplayMode>('label');
   const [sorting, setSorting]                         = useState<SortingState>([]);
   const [columnFilters, setColumnFilters]             = useState<ColumnFiltersState>([]);
   const [infoField, setInfoField]                     = useState<EntityField | null>(null);
-  const [hideBlankZeroColumns, setHideBlankZeroColumns] = useState(false);
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  const [pendingHiddenColumns, setPendingHiddenColumns] = useState<Set<string>>(new Set());
+  const [hideMode, setHideMode] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [exportAllConfirmOpen, setExportAllConfirmOpen] = useState(false);
+  const [exportAllProgress, setExportAllProgress] = useState<{ current: number; total?: number } | null>(null);
+  const [exportAllError, setExportAllError] = useState('');
   const [metadataRefreshToken, setMetadataRefreshToken] = useState(0);
   const [currentViewRows, setCurrentViewRows] = useState<Row[]>([]);
-
-  // Reset to page 0 whenever page size changes
-  useEffect(() => { setPage(0); }, [topN]);
+  const closeFilter = useCallback(() => setFilterOpen(false), []);
+  const closeExportAllConfirm = useCallback(() => setExportAllConfirmOpen(false), []);
+  const exportDialogRef = useModalFocus<HTMLDivElement>(exportAllConfirmOpen, closeExportAllConfirm);
 
   const loadSettings  = useSettingsStore(s => s.load);
   const loadProfiles  = useProfileStore(s => s.load);
@@ -589,6 +781,8 @@ export function EntityDataPage() {
     enabled: profilesLoaded && !!client && !!collection,
     staleTime: 10 * 60 * 1000,
   });
+  const keyFieldNames = useMemo(() => fields.filter(field => field.IsKey).map(field => field.Name), [fields]);
+  const defaultOrderby = useMemo(() => keyFieldNames.map(field => `${field} asc`).join(','), [keyFieldNames]);
 
   const selectedEnumType = getEnumType(infoField);
   const {
@@ -597,28 +791,24 @@ export function EntityDataPage() {
   } = useQuery({
     queryKey: ['metadataEnums', activeProfile?.baseUrl, metadataRefreshToken],
     queryFn: () => client!.fetchMetadataEnums(metadataRefreshToken > 0),
-    enabled: profilesLoaded && !!client && !!selectedEnumType,
+    enabled: profilesLoaded && !!client && (!!selectedEnumType || filterOpen),
     staleTime: 60 * 60 * 1000,
   });
   const enumMembers = getEnumMembers(enumMap, selectedEnumType);
 
   const odataParams = useMemo(() => {
-    const p: ODataParams = {};
-    if (odataFilter) p.filter = odataFilter;
-    if (odataSelect)  p.select  = odataSelect;
-    if (odataOrderby) p.orderby = odataOrderby;
-    const baseSkip = Number.parseInt(odataSkip || '0', 10);
-    const skip = (Number.isNaN(baseSkip) ? 0 : baseSkip) + (page * topN);
+    const p: ODataParams = { ...appliedParams };
+    if (!p.orderby && defaultOrderby) p.orderby = defaultOrderby;
+    const baseSkip = Number.parseInt(appliedParams.skip || '0', 10);
+    const skip = (Number.isNaN(baseSkip) ? 0 : baseSkip) + page * topN;
     if (skip > 0) p.skip = String(skip);
-    if (odataCount) p.count = true;
-    if (odataCrossCompany) p.crossCompany = true;
     return p;
-  }, [odataFilter, odataSelect, odataOrderby, odataSkip, odataCount, odataCrossCompany, page, topN]);
+  }, [appliedParams, defaultOrderby, page, topN]);
 
   const { data: fetchResult, isLoading: dataLoading, error, refetch: refetchData } = useQuery({
-    queryKey: ['entityData', collection, topN, page, activeProfile?.baseUrl, odataFilter, odataSelect, odataOrderby, odataSkip, odataCount, odataCrossCompany],
+    queryKey: ['entityData', collection, topN, page, activeProfile?.baseUrl, appliedParams, defaultOrderby],
     queryFn: () => client!.fetchEntityData(collection, topN, odataParams),
-    enabled: profilesLoaded && !!client && !!collection,
+    enabled: profilesLoaded && !!client && !!collection && !fieldsLoading,
   });
 
   const rawData = useMemo(() => fetchResult?.records ?? [], [fetchResult?.records]);
@@ -647,8 +837,8 @@ export function EntityDataPage() {
   const fieldMap = useMemo(() => new Map(fields.map(f => [f.Name, f])), [fields]);
 
   const selectedFieldSet = useMemo(
-    () => odataSelect ? new Set(odataSelect.split(',').map(s => s.trim())) : null,
-    [odataSelect],
+    () => appliedParams.select ? new Set(appliedParams.select.split(',').map(s => s.trim())) : null,
+    [appliedParams.select],
   );
 
   const allColumnKeys = useMemo(() => {
@@ -662,24 +852,17 @@ export function EntityDataPage() {
     return [];
   }, [fields, rawData, selectedFieldSet]);
 
-  const blankZeroColumnKeys = useMemo(() => {
-    if (rawData.length === 0) return new Set<string>();
-    return new Set(
-      allColumnKeys.filter((key) => rawData.every((row) => isBlankOrZero(row[key]))),
-    );
-  }, [allColumnKeys, rawData]);
-
   const columnKeys = useMemo(
-    () => hideBlankZeroColumns
-      ? allColumnKeys.filter((key) => !blankZeroColumnKeys.has(key))
-      : allColumnKeys,
-    [allColumnKeys, blankZeroColumnKeys, hideBlankZeroColumns],
+    () => hideMode ? allColumnKeys : allColumnKeys.filter(key => !hiddenColumns.has(key)),
+    [allColumnKeys, hiddenColumns, hideMode],
   );
+  const visibleColumnKeys = useMemo(() => allColumnKeys.filter(key => !hiddenColumns.has(key)), [allColumnKeys, hiddenColumns]);
 
   const columns = useMemo<ColumnDef<Record<string, unknown>, unknown>[]>(() =>
     columnKeys.map(key => {
-      const header = fields.find(f => f.Name === key)?.Label || key;
-      const headerSize = getReadableHeaderWidth(header);
+      const label = fields.find(f => f.Name === key)?.Label || key;
+      const headerText = headerDisplayMode === 'field' ? key : label;
+      const headerSize = Math.max(getReadableHeaderWidth(headerText), headerDisplayMode === 'both' ? getReadableHeaderWidth(key) : 0);
       const dataSize = rawData.reduce(
         (max, row) => Math.max(max, getValueWidth(row[key])),
         0,
@@ -691,7 +874,9 @@ export function EntityDataPage() {
       return {
         id: key,
         accessorKey: key,
-        header,
+        header: headerDisplayMode === 'both'
+          ? () => <span className="flex flex-col min-w-0 leading-tight"><span className="truncate" title={label}>{label}</span><span className="truncate text-[10px] font-normal text-surface-400 dark:text-surface-500" title={key}>{key}</span></span>
+          : headerText,
         minSize: ENTITY_DATA_MIN_COLUMN_WIDTH,
         size,
         cell: info => <CellValue value={info.getValue()} />,
@@ -699,12 +884,7 @@ export function EntityDataPage() {
         meta: { filterType: 'multiselect' },
       };
     }),
-    [columnKeys, fields, rawData],
-  );
-
-  const keyFieldNames = useMemo(
-    () => fields.filter((field) => field.IsKey).map((field) => field.Name),
-    [fields],
+    [columnKeys, fields, headerDisplayMode, rawData],
   );
 
   const rowKey = useCallback((row: Record<string, unknown>, index: number) => {
@@ -721,10 +901,10 @@ export function EntityDataPage() {
       return `${firstPopulatedColumn}:${String(row[firstPopulatedColumn])}:${page}:${index}`;
     }
 
-    const baseSkip = Number.parseInt(odataSkip || '0', 10);
-    const absoluteIndex = (Number.isNaN(baseSkip) ? 0 : baseSkip) + (page * topN) + index;
+    const baseSkip = Number.parseInt(appliedParams.skip || '0', 10);
+    const absoluteIndex = (Number.isNaN(baseSkip) ? 0 : baseSkip) + page * topN + index;
     return `row:${absoluteIndex}`;
-  }, [allColumnKeys, keyFieldNames, odataSkip, page, topN]);
+  }, [allColumnKeys, appliedParams.skip, keyFieldNames, page, topN]);
 
   const handleVisibleRowsChange = useCallback((rows: Row[]) => {
     setCurrentViewRows((current) => {
@@ -740,13 +920,101 @@ export function EntityDataPage() {
     void refetchData();
   };
 
-  const applyTopN = (value: string) => {
-    setTopInput(value);
-    const nextTop = Number.parseInt(value, 10);
-    if (!Number.isNaN(nextTop) && nextTop > 0) {
-      setTopN(nextTop);
+  const applyParameters = (params: ODataParams, nextTop?: number) => {
+    setAppliedParams(params);
+    setTopN(nextTop ?? 100);
+    setPage(0);
+    setColumnFilters([]);
+    setGlobalFilter('');
+    setFilterOpen(false);
+  };
+
+  const applyEditedUrl = (value: string): string | null => {
+    let parsed: URL;
+    try {
+      parsed = new URL(value.trim());
+    } catch {
+      return 'Invalid URL';
+    }
+    const match = parsed.pathname.match(/\/data\/([^/]+)/i);
+    try {
+      if (!match || decodeURIComponent(match[1]) !== collection) return `URL must target ${collection}`;
+    } catch {
+      return 'Invalid collection path';
+    }
+    const nextTopValue = Number.parseInt(parsed.searchParams.get('$top') ?? '', 10);
+    applyParameters({
+      filter: parsed.searchParams.get('$filter') || undefined,
+      select: parsed.searchParams.get('$select') || undefined,
+      orderby: parsed.searchParams.get('$orderby') || undefined,
+      skip: parsed.searchParams.get('$skip') || undefined,
+      count: parsed.searchParams.get('$count') === 'true',
+      crossCompany: parsed.searchParams.get('cross-company') === 'true',
+    }, !Number.isNaN(nextTopValue) && nextTopValue > 0 ? nextTopValue : 100);
+    return null;
+  };
+
+  const toggleHideMode = () => {
+    if (hideMode) {
+      setHiddenColumns(new Set(pendingHiddenColumns));
+      setHideMode(false);
+      return;
+    }
+    setPendingHiddenColumns(new Set(hiddenColumns));
+    setHideMode(true);
+  };
+
+  const togglePendingColumn = (column: string) => {
+    setPendingHiddenColumns(current => {
+      const next = new Set(current);
+      if (next.has(column)) next.delete(column); else next.add(column);
+      return next;
+    });
+  };
+
+  const exportAll = async () => {
+    if (!client || !collection) return;
+    closeExportAllConfirm();
+    setExportAllError('');
+    const pageSize = 1000;
+    const baseSkip = Math.max(0, Number.parseInt(appliedParams.skip || '0', 10) || 0);
+    const exportColumns = visibleColumnKeys.length > 0 ? visibleColumnKeys : allColumnKeys;
+    const exportOrderby = appliedParams.orderby || defaultOrderby || undefined;
+    let exportPage = 0;
+    let exportedCount = 0;
+    let totalPages: number | undefined;
+    let hasMore = true;
+    let writer: StreamingCSVWriter | null = null;
+    try {
+      writer = await createStreamingCSVWriter(`${collection}-all.csv`, exportColumns);
+      while (hasMore) {
+        setExportAllProgress({ current: exportPage + 1, total: totalPages });
+        let result = await client.fetchEntityData(collection, pageSize, { ...appliedParams, orderby: exportOrderby, select: exportColumns.length ? exportColumns.join(',') : appliedParams.select, skip: String(baseSkip + exportPage * pageSize), count: exportPage === 0 });
+        if (exportPage === 0 && result.totalCount !== undefined) totalPages = Math.max(1, Math.ceil(Math.max(0, result.totalCount - baseSkip) / pageSize));
+        let logicalPageCount = 0;
+        let hasNextFragment = true;
+        while (hasNextFragment) {
+          await writer.writeRows(result.records);
+          logicalPageCount += result.records.length;
+          exportedCount += result.records.length;
+          if (result.nextLink) result = await client.fetchEntityDataNextPage(result.nextLink);
+          else hasNextFragment = false;
+        }
+        exportPage += 1;
+        setExportAllProgress({ current: exportPage, total: totalPages });
+        hasMore = logicalPageCount === pageSize && (totalPages === undefined || exportPage < totalPages);
+      }
+      if (exportedCount === 0) throw new Error('No matching records were returned.');
+      await writer.close();
+      writer = null;
+    } catch (exportError) {
+      await writer?.abort(exportError).catch(() => undefined);
+      if (!(exportError instanceof DOMException && exportError.name === 'AbortError')) setExportAllError(exportError instanceof Error ? exportError.message : 'CSV All failed.');
+    } finally {
+      setExportAllProgress(null);
     }
   };
+
   const exportRows = currentViewRows.length > 0 || globalFilter || columnFilters.length > 0 || sorting.length > 0
     ? currentViewRows
     : rawData;
@@ -771,27 +1039,22 @@ export function EntityDataPage() {
         <div className="flex-1 min-w-0" />
         <BrowserToolbarProfile profile={activeProfile} />
 
-        {/* $top */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-xs text-surface-300">$top</span>
-          <input
-            type="number"
-            min="1"
-            list="entity-data-top-options"
-            value={topInput}
-            onChange={e => applyTopN(e.target.value)}
-            onBlur={() => {
-              if (!topInput || Number.parseInt(topInput, 10) <= 0 || Number.isNaN(Number.parseInt(topInput, 10))) {
-                setTopInput(String(topN));
-              }
-            }}
-            className={`w-[13ch] ${BROWSER_TOOLBAR_INPUT_CLS}`}
-            title="Custom $top value"
-          />
-          <datalist id="entity-data-top-options">
-            {TOP_OPTIONS.map(n => <option key={n} value={n} />)}
-          </datalist>
-        </div>
+        <label className="flex items-center gap-1.5 shrink-0 text-xs text-surface-200">
+          Headers
+          <select value={headerDisplayMode} onChange={event => setHeaderDisplayMode(event.target.value as HeaderDisplayMode)}
+            className="px-2 py-1.5 text-xs rounded-lg border bg-white dark:bg-surface-800 border-surface-200 dark:border-surface-600 text-surface-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-600/30"
+            title="Choose how entity column headers are displayed" aria-label="Column header display">
+            <option value="label">Label</option>
+            <option value="field">Field</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+
+        {exportAllProgress && (
+          <span className="px-2 py-1 text-xs font-medium rounded bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 shrink-0">
+            CSV All: {exportAllProgress.current} of {exportAllProgress.total ?? '#'}
+          </span>
+        )}
 
         {!isLoading && !error && (
           <>
@@ -808,25 +1071,23 @@ export function EntityDataPage() {
           </>
         )}
 
-        <ExportButton data={exportRows} columns={columnKeys} filename={collection} />
+        <ExportButton data={exportRows} columns={visibleColumnKeys} filename={collection} onExportAll={() => setExportAllConfirmOpen(true)} disabledAll={!client || !collection || !!exportAllProgress} />
+
+        <button type="button" onClick={() => setFilterOpen(true)} disabled={isLoading || fields.length === 0}
+          className={filterOpen ? BROWSER_TOOLBAR_ACTION_ACTIVE_CLS : BROWSER_TOOLBAR_ACTION_CLS} title="Open staged OData filters and column selection">
+          <SlidersHorizontal className="w-3.5 h-3.5" /> Filter
+        </button>
 
         <button
           type="button"
-          onClick={() => setHideBlankZeroColumns((value) => !value)}
-          disabled={rawData.length === 0 || blankZeroColumnKeys.size === 0}
-          className={[
-            hideBlankZeroColumns
-              ? BROWSER_TOOLBAR_ACTION_ACTIVE_CLS
-              : BROWSER_TOOLBAR_ACTION_CLS,
-            rawData.length === 0 || blankZeroColumnKeys.size === 0 ? 'opacity-40 cursor-not-allowed' : '',
-          ].join(' ')}
-          title="Hide columns where every fetched value is blank, zero, No, or false"
+          onClick={toggleHideMode}
+          disabled={allColumnKeys.length === 0}
+          className={hideMode ? BROWSER_TOOLBAR_ACTION_ACTIVE_CLS : BROWSER_TOOLBAR_ACTION_CLS}
+          title={hideMode ? 'Apply the selected hidden columns' : 'Choose columns to hide or show'}
         >
           <EyeOff className="w-3.5 h-3.5" />
-          Hide empty/zero
-          {blankZeroColumnKeys.size > 0 && (
-            <span className="text-[10px] opacity-80">({blankZeroColumnKeys.size})</span>
-          )}
+          {hideMode ? 'Apply hide' : 'Hide'}
+          {(hideMode ? pendingHiddenColumns.size : hiddenColumns.size) > 0 && <span className="text-[10px] opacity-80">({hideMode ? pendingHiddenColumns.size : hiddenColumns.size})</span>}
         </button>
 
         <button onClick={refreshGrid} disabled={isLoading}
@@ -835,7 +1096,9 @@ export function EntityDataPage() {
         </button>
       </BrowserToolbar>
 
-      {queryUrl && <QueryUrlBar url={queryUrl} />}
+      {queryUrl && <QueryUrlBar url={queryUrl} onApply={applyEditedUrl} />}
+
+      {exportAllError && <div className="flex items-center justify-between gap-3 px-4 py-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800"><span>CSV All: {exportAllError}</span><button onClick={() => setExportAllError('')} aria-label="Dismiss export error"><X className="w-3.5 h-3.5" /></button></div>}
 
       {/* Error */}
       {error && (
@@ -915,12 +1178,16 @@ export function EntityDataPage() {
           globalFilter={globalFilter}
           onGlobalFilterChange={setGlobalFilter}
           onVisibleRowsChange={handleVisibleRowsChange}
+          hideMode={hideMode}
+          pendingHiddenColumns={hideMode ? pendingHiddenColumns : hiddenColumns}
+          onToggleColumnHidden={togglePendingColumn}
           emptyMessage={emptyRecordsMessage}
           pagination={{
+            enabled: true,
             page,
             topN,
             totalFetched: rawData.length,
-            hasMore: rawData.length === topN,
+            hasMore: !!fetchResult?.nextLink || rawData.length === topN,
             isLoading: dataLoading,
             onReset: () => setPage(0),
             onPrev: () => setPage(p => Math.max(0, p - 1)),
@@ -936,6 +1203,19 @@ export function EntityDataPage() {
           enumLoading={enumLoading}
           onClose={() => setInfoField(null)}
         />
+      )}
+
+      <FilterDrawer open={filterOpen} fields={fields} enumMap={enumMap} enumLoading={enumLoading} visibleColumns={visibleColumnKeys} hiddenColumns={hiddenColumns} initialParams={appliedParams} initialTop={topN} onClose={closeFilter} onApply={applyParameters} />
+
+      {exportAllConfirmOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="csv-all-title">
+          <div ref={exportDialogRef} tabIndex={-1} className="w-full max-w-md rounded-xl bg-white dark:bg-surface-850 border border-surface-200 dark:border-surface-700 shadow-2xl p-5 outline-none">
+            <h2 id="csv-all-title" className="text-base font-semibold">Export all matching records?</h2>
+            <p className="mt-2 text-sm text-surface-600 dark:text-surface-300">CSV All requests every matching D365FO page and writes each page directly to the file you choose. Large entities can take several minutes and make many requests. Progress will appear in the top toolbar.</p>
+            <p className="mt-2 text-xs text-surface-400">Only currently viewable columns are requested, including the applied OData filter and sort.</p>
+            <div className="mt-5 flex justify-end gap-2"><button onClick={closeExportAllConfirm} className="px-4 py-2 text-xs rounded border border-surface-200 dark:border-surface-700">Cancel</button><button onClick={() => void exportAll()} className="px-4 py-2 text-xs font-medium rounded bg-brand-600 text-white hover:bg-brand-700">Proceed</button></div>
+          </div>
+        </div>
       )}
     </div>
   );

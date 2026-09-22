@@ -41,6 +41,50 @@ export function exportCSV(
   downloadFile(content, filename, 'text/csv;charset=utf-8;');
 }
 
+interface WritableFileStreamLike {
+  write(data: string): Promise<void>;
+  close(): Promise<void>;
+  abort(reason?: unknown): Promise<void>;
+}
+
+interface FileHandleLike {
+  createWritable(): Promise<WritableFileStreamLike>;
+}
+
+type SaveFilePicker = (options: {
+  suggestedName: string;
+  types: Array<{ description: string; accept: Record<string, string[]> }>;
+}) => Promise<FileHandleLike>;
+
+export interface StreamingCSVWriter {
+  writeRows(data: Record<string, unknown>[]): Promise<void>;
+  close(): Promise<void>;
+  abort(reason?: unknown): Promise<void>;
+}
+
+/** Streams CSV rows directly to a user-selected file without retaining the full export in memory. */
+export async function createStreamingCSVWriter(filename: string, headers: string[]): Promise<StreamingCSVWriter> {
+  const picker = (window as Window & { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+  if (!picker) throw new Error('CSV All requires a Chromium browser with Save As support.');
+
+  const handle = await picker.call(window, {
+    suggestedName: filename,
+    types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }],
+  });
+  const writable = await handle.createWritable();
+  await writable.write(`\uFEFF${headers.map(escapeCSVValue).join(',')}\r\n`);
+
+  return {
+    async writeRows(data) {
+      if (data.length === 0) return;
+      const content = data.map(row => headers.map(header => escapeCSVValue(String(row[header] ?? ''))).join(',')).join('\r\n');
+      await writable.write(`${content}\r\n`);
+    },
+    close: () => writable.close(),
+    abort: reason => writable.abort(reason),
+  };
+}
+
 /**
  * Escape CSV value
  */
