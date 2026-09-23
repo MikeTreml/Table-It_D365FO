@@ -35,6 +35,7 @@ function ContrastBadge({ fg, bg, label }: { fg: string; bg: string; label: strin
 function ColorRow({
   label, value, onChange,
   contrastFg, contrastBg, contrastLabel,
+  contrastFg2, contrastBg2, contrastLabel2,
 }: {
   label: string;
   value: string;
@@ -42,6 +43,11 @@ function ColorRow({
   contrastFg?: string;
   contrastBg?: string;
   contrastLabel?: string;
+  // Optional second pairing — used e.g. to also validate the white text
+  // that's rendered on top of this color across buttons/badges app-wide.
+  contrastFg2?: string;
+  contrastBg2?: string;
+  contrastLabel2?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -62,6 +68,9 @@ function ColorRow({
       {contrastFg && contrastBg && contrastLabel && (
         <ContrastBadge fg={contrastFg} bg={contrastBg} label={contrastLabel} />
       )}
+      {contrastFg2 && contrastBg2 && contrastLabel2 && (
+        <ContrastBadge fg={contrastFg2} bg={contrastBg2} label={contrastLabel2} />
+      )}
     </div>
   );
 }
@@ -71,7 +80,7 @@ function ColorRow({
 function PresetCard({
   name, theme, active, onSelect, tooltip,
 }: {
-  id: string; name: string; theme: ColorTheme; active: boolean; onSelect: () => void; tooltip?: string;
+  name: string; theme: ColorTheme; active: boolean; onSelect: () => void; tooltip?: string;
 }) {
   const { toolbar, primaryAction, highlight } = theme.light;
   return (
@@ -174,7 +183,6 @@ function ColorThemeSection() {
         {COLOR_PRESETS.map(p => (
           <PresetCard
             key={p.id}
-            id={p.id}
             name={p.name}
             theme={getPresetTheme(settings, p.id)}
             active={selectedPresetId === p.id}
@@ -206,6 +214,7 @@ function ColorThemeSection() {
                 value={ct.light.primaryAction}
                 onChange={v => updateLight({ primaryAction: v })}
                 contrastFg={ct.light.bodyText} contrastBg={ct.light.pageBg} contrastLabel="text/bg"
+                contrastFg2="#ffffff" contrastBg2={ct.light.primaryAction} contrastLabel2="white/primary"
               />
               <ColorRow
                 label="Highlight / Accent"
@@ -346,7 +355,8 @@ export function ConfigTab() {
               Overrides color presets while enabled.
             </span>
           </span>
-        </label>        {/* Color Theme — no heading */}
+        </label>
+        {/* Color Theme — no heading */}
         <ColorThemeSection />
 
         {/* Environments header + add form */}

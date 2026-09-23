@@ -126,8 +126,15 @@ function MultiSelectDropdown({
     const h = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', h);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [onClose]);
 
   const visible = search
@@ -200,8 +207,15 @@ function NumberDropdown({
     const h = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', h);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [onClose]);
 
   return (
@@ -279,6 +293,16 @@ export function ColumnFilter({
     : [];
 
   const close = useCallback(() => setOpen(false), []);
+
+  // Dropdown position is measured once on open; if the grid (or page) scrolls
+  // while it's open, the fixed-position portal would drift from its trigger.
+  // Simplest fix: close it so it never renders detached.
+  useEffect(() => {
+    if (!open) return;
+    const handleScroll = () => setOpen(false);
+    document.addEventListener('scroll', handleScroll, true);
+    return () => document.removeEventListener('scroll', handleScroll, true);
+  }, [open]);
 
   const handleOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -376,7 +400,9 @@ export function DataGrid<T extends object>({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
+  const [focusedRowIndex, setFocusedRowIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
   const readableColumns = useMemo(
     () => withReadableHeaderWidths(columns as unknown as ColumnDef<T, unknown>[]).map((column) => {
       const hasDataAccessor = 'accessorKey' in column || 'accessorFn' in column;
@@ -447,7 +473,12 @@ export function DataGrid<T extends object>({
       const next = rows[nextIndex];
       if (!next) return;
       onRowSelect(next.original);
+      setFocusedRowIndex(nextIndex);
       virtualizer.scrollToIndex(nextIndex, { align: 'auto' });
+      // The virtualizer re-renders the newly visible row asynchronously;
+      // focus it once it lands so keyboard navigation keeps working with
+      // a roving tabindex (only one row is in the tab order at a time).
+      requestAnimationFrame(() => rowRefs.current.get(nextIndex)?.focus());
       return;
     }
 
@@ -514,6 +545,7 @@ export function DataGrid<T extends object>({
                             </button>
                             <ColumnFilter
                               column={header.column as import('@tanstack/react-table').Column<unknown, unknown>}
+                              positioned={false}
                             />
                           </>
                         ) : (
@@ -523,6 +555,7 @@ export function DataGrid<T extends object>({
                             </span>
                             <ColumnFilter
                               column={header.column as import('@tanstack/react-table').Column<unknown, unknown>}
+                              positioned={false}
                             />
                           </div>
                         )}
@@ -570,10 +603,18 @@ export function DataGrid<T extends object>({
                   return (
                     <tr
                       key={row.id}
+                      ref={(el) => {
+                        if (el) rowRefs.current.set(vRow.index, el);
+                        else rowRefs.current.delete(vRow.index);
+                      }}
                       style={{ height: rowHeight }}
-                      onClick={() => onRowSelect?.(isSelected ? null : row.original)}
+                      onClick={() => {
+                        onRowSelect?.(isSelected ? null : row.original);
+                        setFocusedRowIndex(vRow.index);
+                      }}
+                      onFocus={() => setFocusedRowIndex(vRow.index)}
                       onKeyDown={(event) => handleRowKeyDown(event, vRow.index, row.original, isSelected)}
-                      tabIndex={onRowSelect ? 0 : undefined}
+                      tabIndex={onRowSelect ? (vRow.index === focusedRowIndex ? 0 : -1) : undefined}
                       aria-selected={onRowSelect ? isSelected : undefined}
                       className={[
                         'cursor-pointer transition-colors border-b border-surface-200 dark:border-surface-700/70',

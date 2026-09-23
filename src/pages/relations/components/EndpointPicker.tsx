@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import React, { useId, useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import type { GraphNode } from '../worker/graphTypes';
 
 interface EndpointPickerProps {
@@ -16,6 +16,7 @@ export function EndpointPicker({ label, value, onChange, nodes, placeholder, lab
   const [open, setOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
 
   useEffect(() => { setQuery(value); }, [value]);
 
@@ -84,6 +85,8 @@ export function EndpointPicker({ label, value, onChange, nodes, placeholder, lab
     }
   };
 
+  const isOpenWithOptions = open && suggestions.length > 0;
+
   return (
     <div ref={wrapperRef} className="relative flex flex-col gap-1 min-w-0">
       <label className={labelClassName ?? 'text-[10px] font-medium uppercase tracking-wide text-surface-400 dark:text-surface-500'}>
@@ -91,6 +94,11 @@ export function EndpointPicker({ label, value, onChange, nodes, placeholder, lab
       </label>
       <input
         type="text"
+        role="combobox"
+        aria-expanded={isOpenWithOptions}
+        aria-autocomplete="list"
+        aria-controls={listboxId}
+        aria-activedescendant={isOpenWithOptions ? `${listboxId}-option-${highlightIndex}` : undefined}
         value={query}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); setHighlightIndex(0); }}
         onFocus={() => setOpen(true)}
@@ -102,11 +110,19 @@ export function EndpointPicker({ label, value, onChange, nodes, placeholder, lab
         placeholder={placeholder}
         className={inputClassName ?? 'px-3 py-2 text-sm rounded-lg border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-surface-800 dark:text-surface-200 focus:outline-none focus:border-brand-500 dark:focus:border-brand-500'}
       />
-      {open && suggestions.length > 0 && (
-        <div className="absolute left-0 top-full mt-1 z-20 w-[34rem] max-w-[calc(100vw-2rem)] max-h-96 overflow-y-auto overscroll-contain bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg shadow-lg">
+      {isOpenWithOptions && (
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-label={label}
+          className="absolute left-0 top-full mt-1 z-20 w-[34rem] max-w-[calc(100vw-2rem)] max-h-96 overflow-y-auto overscroll-contain bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700 rounded-lg shadow-lg"
+        >
           {suggestions.map((n, i) => (
             <button
               key={`${n.name}::${n.type}`}
+              id={`${listboxId}-option-${i}`}
+              role="option"
+              aria-selected={i === highlightIndex}
               type="button"
               onMouseDown={(e) => { e.preventDefault(); commit(n); }}
               onMouseEnter={() => setHighlightIndex(i)}

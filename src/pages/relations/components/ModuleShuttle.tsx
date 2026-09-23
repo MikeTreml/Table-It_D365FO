@@ -31,11 +31,15 @@ export function ModuleShuttle({
     );
   }, [allModules, selectedSet, search]);
 
-  const togglePick = (which: 'left' | 'right', name: string, ev: React.MouseEvent) => {
+  const togglePick = (
+    which: 'left' | 'right',
+    name: string,
+    modifiers: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+  ) => {
     const setter = which === 'left' ? setLeftPicks : setRightPicks;
     setter((prev) => {
       const next = new Set(prev);
-      if (ev.shiftKey || ev.ctrlKey || ev.metaKey) {
+      if (modifiers.shiftKey || modifiers.ctrlKey || modifiers.metaKey) {
         if (next.has(name)) next.delete(name);
         else next.add(name);
         return next;
@@ -46,6 +50,12 @@ export function ModuleShuttle({
       return next;
     });
   };
+
+  const modifiersFromEvent = (ev: React.MouseEvent | React.KeyboardEvent) => ({
+    shiftKey: ev.shiftKey,
+    ctrlKey: ev.ctrlKey,
+    metaKey: ev.metaKey,
+  });
 
   const moveRight = () => {
     if (leftPicks.size === 0) return;
@@ -116,17 +126,31 @@ export function ModuleShuttle({
             placeholder={searchPlaceholder}
             className="mb-1 h-8 shrink-0 px-2 py-1 text-xs rounded border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-surface-800 dark:text-surface-200 placeholder-surface-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
-          <div className="border border-surface-200 dark:border-surface-700 rounded h-[9.075rem] shrink-0 overflow-y-auto bg-white dark:bg-surface-800">
+          <div
+            role="listbox"
+            aria-multiselectable="true"
+            aria-label={`Available ${title.toLowerCase()}`}
+            className="border border-surface-200 dark:border-surface-700 rounded h-[9.075rem] shrink-0 overflow-y-auto bg-white dark:bg-surface-800"
+          >
             {available.length === 0 ? (
               <div className="p-2 text-[11px] text-surface-400 text-center italic">{emptyLabel}</div>
             ) : (
               available.map((m) => (
                 <div
                   key={m}
-                  onClick={(e) => togglePick('left', m, e)}
+                  role="option"
+                  aria-selected={leftPicks.has(m)}
+                  tabIndex={0}
+                  onClick={(e) => togglePick('left', m, modifiersFromEvent(e))}
                   onDoubleClick={() => {
                     onChange([...selected, m]);
                     setLeftPicks(new Set());
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      togglePick('left', m, modifiersFromEvent(e));
+                    }
                   }}
                   className={listItem(leftPicks.has(m))}
                   title={m}
@@ -182,17 +206,31 @@ export function ModuleShuttle({
           <div className="text-[10px] text-surface-400 mb-1 h-8 shrink-0 flex items-center">
             Selected ({selected.length})
           </div>
-          <div className="border border-surface-200 dark:border-surface-700 rounded h-[9.075rem] shrink-0 overflow-y-auto bg-white dark:bg-surface-800">
+          <div
+            role="listbox"
+            aria-multiselectable="true"
+            aria-label={`Selected ${title.toLowerCase()}`}
+            className="border border-surface-200 dark:border-surface-700 rounded h-[9.075rem] shrink-0 overflow-y-auto bg-white dark:bg-surface-800"
+          >
             {selected.length === 0 ? (
               <div className="p-2 text-[11px] text-surface-400 text-center italic">Empty</div>
             ) : (
               selected.map((m) => (
                 <div
                   key={m}
-                  onClick={(e) => togglePick('right', m, e)}
+                  role="option"
+                  aria-selected={rightPicks.has(m)}
+                  tabIndex={0}
+                  onClick={(e) => togglePick('right', m, modifiersFromEvent(e))}
                   onDoubleClick={() => {
                     onChange(selected.filter((x) => x !== m));
                     setRightPicks(new Set());
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      togglePick('right', m, modifiersFromEvent(e));
+                    }
                   }}
                   className={listItem(rightPicks.has(m))}
                   title={m}
