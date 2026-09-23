@@ -78,7 +78,7 @@ export function BrowserToolbarIdentity({ icon, title }: BrowserToolbarIdentityPr
   return (
     <div className="flex items-center gap-3 text-accent-400 shrink-0 min-w-0">
       <div className="shrink-0 text-white">{icon}</div>
-      <span className="text-2xl font-semibold text-surface-50 shrink-0 truncate max-w-[72ch]" title={title}>
+      <span className="text-lg font-semibold text-surface-50 shrink-0 truncate max-w-[72ch]" title={title}>
         {title}
       </span>
     </div>
@@ -91,7 +91,7 @@ export function BrowserToolbarProfile({ profile }: BrowserToolbarProfileProps) {
     : 'No profile configured';
 
   return (
-    <span className={`truncate font-semibold shrink-0 ${profile ? 'text-3xl text-surface-50' : 'text-3xl text-accent-300'}`}>
+    <span className={`truncate font-semibold shrink-0 ${profile ? 'text-sm text-surface-50' : 'text-sm text-accent-300'}`}>
       {primaryText}
     </span>
   );

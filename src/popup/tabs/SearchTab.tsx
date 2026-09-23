@@ -108,7 +108,7 @@ export function SearchTab() {
       {/* Results + quick launch (scrolls) */}
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 flex flex-col gap-3">
       {results.length > 0 && (
-        <div className="flex flex-col divide-y divide-surface-100 dark:divide-surface-800 min-h-0 max-h-[280px] overflow-y-auto rounded-lg border border-surface-200 dark:border-surface-700">
+        <div className="flex flex-col divide-y divide-surface-100 dark:divide-surface-800 rounded-lg border border-surface-200 dark:border-surface-700">
           {results.map((table) => (
             <div
               key={table.name}

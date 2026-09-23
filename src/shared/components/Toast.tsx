@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { CheckCircle, XCircle, Info, X } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -16,19 +16,47 @@ interface ToastContextValue {
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
+const TOAST_DURATION_MS = 4000;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const remove = useCallback((id: string) => {
+    const timer = timers.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const startTimer = useCallback((id: string) => {
+    const timer = setTimeout(() => remove(id), TOAST_DURATION_MS);
+    timers.current.set(id, timer);
+  }, [remove]);
+
+  const pauseTimer = useCallback((id: string) => {
+    const timer = timers.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+  }, []);
 
   const add = useCallback((type: ToastType, message: string) => {
     const id = `toast_${Date.now()}`;
     setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
+    startTimer(id);
+  }, [startTimer]);
 
-  const remove = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id));
+  useEffect(() => {
+    const timerMap = timers.current;
+    return () => {
+      timerMap.forEach((timer) => clearTimeout(timer));
+      timerMap.clear();
+    };
+  }, []);
 
   const value: ToastContextValue = {
     success: (msg) => add('success', msg),
@@ -55,6 +83,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((toast) => (
           <div
             key={toast.id}
+            onMouseEnter={() => pauseTimer(toast.id)}
+            onMouseLeave={() => startTimer(toast.id)}
             className={[
               'flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg pointer-events-auto',
               'bg-white dark:bg-surface-800 border border-surface-200 dark:border-surface-700',

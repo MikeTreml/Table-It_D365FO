@@ -85,6 +85,8 @@ export function FilterPanel({ modules, countries, filters, onChange }: FilterPan
               <button
                 key={type}
                 type="button"
+                role="checkbox"
+                aria-checked={checked}
                 onClick={() => toggleType(type)}
                 className={[
                   'flex items-center gap-2 px-2 py-1.5 text-xs text-left rounded border transition-colors',
